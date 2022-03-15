@@ -1,0 +1,33 @@
+#include <iostream>
+#include <windows.h>
+using namespace std;
+
+
+int main()
+{
+	int sum[10];
+	int a[10], b[10][10];
+	for (int i = 0; i < 10; i++)
+	{
+		a[i] = i;
+		for (int j = 0; j < 10; j++)
+		{
+			b[i][j] = i + j;
+		}
+	}
+	
+	for (int i = 0; i < 10; i++)
+		sum[i] = 0.0;
+	long long head, tail, freq;
+	QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
+	QueryPerformanceCounter((LARGE_INTEGER*)&head);
+	for (int j = 0; j < 10; j++)
+		for (int i = 0; i < 10; i++)
+			sum[i] += b[j][i] * a[j];
+	QueryPerformanceCounter((LARGE_INTEGER*)&tail);
+	for (int i = 0; i < 10; i++)
+	{
+		cout << sum[i] << endl;
+	}
+	return 0;
+}
