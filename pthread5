@@ -1,0 +1,223 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <pthread.h>
+#include <time.h>
+
+#define _ABS(x) ((x) > 0 ? (x) : -(x))
+#define SIZE 8000
+#define NUM_THREADS 32
+#define _XOPEN_SOURCE 600
+
+double *a[SIZE];             /* matrix a  */
+double *org_a[SIZE];         /* the copy of original  matrix a  */
+double *org_b;               /* the copy of original vector b  */
+double *b;                   /* vector b  */
+double *c;                   /* result of gaussian elimination, vector x  */
+int public_max[SIZE];        /* stores the index of max value*/
+double public_max_value[SIZE];  /* stores the max value  */
+pthread_mutex_t max_lock;
+pthread_barrier_t barr;
+
+
+/*
+   print the matrix a
+*/
+
+void printa()
+{
+  int i,j;
+  for(i=0;i<SIZE;i++)
+  {
+    for(j=0;j<SIZE;j++)
+    {
+      if(j<SIZE-1) printf("%f ", *(a[i]+j));
+      else if(j==SIZE-1) printf("%f\n", *(a[i]+j));
+    }
+  }
+}
+
+
+
+/*
+       Thread function: Gaussian Elimination, return an equivalent upper-triangular matrix for 
+       the input nxn matrix
+*/
+
+void *GaussianEliminate(void *thread_id)
+{  
+ int *id = (int *)thread_id;
+ int t_id = *id; 
+ int i,j,k;
+ 
+  /* find the index of max element in current colum */
+ for(k=0;k<SIZE;k++)
+ { 
+   int local_max = k;
+   double local_max_value = public_max_value[k]; 
+   for(i=k+t_id;i<SIZE;i=i+NUM_THREADS)
+   {  
+    
+       if(_ABS(*(a[i]+k)) > _ABS(local_max_value)) 
+       {
+        local_max = i;
+        local_max_value = *(a[i]+k);
+       }
+     
+   }
+
+  /* updata the local max to public max */
+   pthread_mutex_lock(&max_lock);
+   if(_ABS(local_max_value) > _ABS(public_max_value[k]))
+   { 
+    public_max[k] = local_max;
+    public_max_value[k] = local_max_value;
+   }
+   pthread_mutex_unlock(&max_lock);
+   
+   pthread_barrier_wait(&barr);             /* wait every thread finished above work */
+  
+   /* exchange the row of max value located with current row */  
+   if(t_id == 0)
+   {
+     
+       double *temp_a = a[public_max[k]];
+       a[public_max[k]] = a[k];
+       a[k] = temp_a;
+     
+     
+       double temp_b = b[public_max[k]];
+       b[public_max[k]] = b[k];
+       b[k] = temp_b;
+   }
+   
+   pthread_barrier_wait(&barr);         /* wait every thread finished above work */
+   
+   /* triangularize the matrix a, eliminate values below max value in a colum */
+   for(i=k+1+t_id;i<SIZE;i=i+NUM_THREADS)
+   {
+     
+       double m = (*(a[i]+k)) / public_max_value[k];
+       for(j=k;j<SIZE;j++) *(a[i]+j) = (*(a[i]+j)) - m * (*(a[k]+j));     
+       b[i] = b[i] - m * b[k];
+     
+   }   
+   pthread_barrier_wait(&barr);      /* wait every thread finished above work */
+     
+ }
+
+  pthread_exit(0);
+  
+}
+
+
+/*
+     Using back substitution to compute the result vector x, it stored in array c. 
+*/
+int ComputeResult(double **a, double *b, double *c, int n)
+{
+  int i,j;
+
+  for(i=n-1;i>=0;i--)
+  {
+    c[i] = b[i]/(*(a[i]+i));
+
+    for(j=i+1;j<n;j++)
+    {
+      c[i] = c[i] - ((*(a[i]+j))*c[j])/(*(a[i]+i));
+
+    }
+  }
+ // printf("tag\n");
+  return 1;
+}
+
+/*
+    compute the square root of the sum of the squares of the residual vector, return the value of L2-norm.
+*/
+double CheckResult(double **a, double *b, double *c, int n)
+{
+  double d[n];
+  int i,j;
+  double sum = 0;
+
+  for(i=0;i<n;i++)
+  { d[i] = 0;
+    for(j=0;j<n;j++)
+    {
+      d[i] = d[i] + (*(a[i]+j))*c[j];
+    }
+    d[i] = d[i] - b[i];
+  }
+  
+  for(i=0;i<n;i++)
+  {sum+= d[i]*d[i];}
+
+  //sum = sqrt(sum);
+  return sum;
+}
+
+
+/*
+    Using drand48 to generate elements for matrix A and b
+*/
+
+void GenerateNum(double **a, double *b, int n, double **org_a, double *org_b)
+{
+  int i,j;
+  for(i=0;i<n;i++)
+  {
+    for(j=0;j<n;j++)
+    {
+     srand48(time(NULL)*(i+3)/(j+4));
+     *(a[i]+j) = drand48();
+     *(org_a[i]+j) = *(a[i]+j);
+    }
+    srand48(time(NULL));
+    b[i] = drand48();
+    org_b[i] = b[i];
+  }
+}
+
+int main (int argc, const char * argv[]) 
+{ 
+ int thread_id[NUM_THREADS];
+ pthread_t p_threads[NUM_THREADS];
+ pthread_attr_t attr;
+ pthread_attr_init(&attr);
+ pthread_mutex_init(&max_lock, NULL);
+ pthread_barrier_init(&barr,NULL,NUM_THREADS);
+ int ret;
+ int n = SIZE;
+ int i,j;
+ time_t start, end;
+
+ /* initialization matrix a, vector b, vector x and other values */
+ for(i=0;i<n;i++)
+{
+  a[i] = (double*)malloc(n*sizeof(double));
+  org_a[i] = (double*)malloc(n*sizeof(double)); 
+  public_max[i] = i;
+  public_max_value[i] = *(a[i]+i);
+}
+ b = (double*)malloc(n*sizeof(double));
+ org_b = (double*)malloc(n*sizeof(double));
+ c = (double*)malloc(n*sizeof(double));
+
+ GenerateNum(a,b,n,org_a,org_b);
+ start = time(0);
+ /* Create threads */
+ for(i=0;i<NUM_THREADS;i++)
+{
+  thread_id[i] = i;
+  ret =  pthread_create(&p_threads[i], &attr, GaussianEliminate, (void *) &thread_id[i]);
+  if(ret!=0) printf("Create pthread error!\n");
+ }
+ for(i=0;i<NUM_THREADS;i++) pthread_join(p_threads[i], NULL);
+ ComputeResult(a,b,c,n); 
+ end = time(0);
+ double sum = CheckResult(org_a,org_b,c,n);
+ int duration = end - start;
+ printf("L2-norm is %f\n", sum);
+ printf("gaussian eliminate and back substitution time is %d sec\n ",duration);
+}
