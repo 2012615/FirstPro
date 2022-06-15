@@ -1,0 +1,44 @@
+cudaError_t ret;
+    for(int k=0;k<width;k++){
+        division_kernel<<<grid,block>>>(data_D,...);
+        cudaDeviceSynchronize();
+        ret = cudaGetLastError();
+        if(ret!=cudaSuccess){
+            printf("division_kernel failed,%s\n",cudaGetErrorString(ret));
+            }
+            eliminate_kernel<<<grid,block>>>(data_D,...);
+            cudaDeviceSynchronize();
+            ret = cudaGetLastError();
+            if(ret!=cudaSuccess){
+                printf("eliminate_kernel failed, %s\n",cudaGetErrorString(ret));
+            }
+        }
+    __global__ void division_kernel(float* data, int k, int N){
+        int tid = blockDim.x * blockIdx.x + threadIdx.x;
+        int element = data[k*N+k];
+        int temp = data[k*N+tid];
+        data[k*N+tid] = (float)temp/element;
+        return;
+    }
+    __global__ void eliminate_kernel(float* data, int k, int N){
+        int tx = blockDim.x * blockIdx.x + threadIdx.x;
+        if(tx==0)
+        data[k*N+k]=1.0;
+        int row = k+1+blockIdx.x;
+        while(row<N){
+            int tid = threadIdx.x;
+            while(k+1+tid < N){
+                int col = k+1+tid;
+                T temp_1 = data[(row*N) + col];
+                T temp_2 = data[(row*N)+k];
+                T temp_3 = data[k*N+col];
+                data[(row*N) + col] = temp_1 - temp_2*temp_3;
+                tid = tid + blockDim.x;
+            }
+            __syncthreads();
+            if (threadIdx.x == 0){
+                data[row * N + k] = 0;
+            }
+            row += gridDim.x;
+        }
+        return;
